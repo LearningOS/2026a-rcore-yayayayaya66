@@ -40,6 +40,86 @@ pub struct MemorySet {
 }
 
 impl MemorySet {
+    /// Map or unmap a page-aligned user range after checking the whole range.
+    pub fn user_mapping(&mut self, start: usize, len: usize, prot: Option<usize>) -> isize {
+        if start % PAGE_SIZE != 0 || prot.map_or(false, |p| p == 0 || p & !7 != 0) {
+            return -1;
+        }
+        let end = match start
+            .checked_add(len)
+            .and_then(|x| x.checked_add(PAGE_SIZE - 1))
+        {
+            Some(end) => end / PAGE_SIZE * PAGE_SIZE,
+            None => return -1,
+        };
+        // Restrict mappings to the canonical lower half of Sv39.
+        if start >= (1usize << 38) || end > (1usize << 38) {
+            return -1;
+        }
+        let first = start / PAGE_SIZE;
+        let last = end / PAGE_SIZE;
+        for n in first..last {
+            let valid = self
+                .translate(VirtPageNum(n))
+                .map_or(false, |pte| pte.is_valid());
+            if valid == prot.is_some() {
+                return -1;
+            }
+        }
+        if let Some(p) = prot {
+            let permission =
+                MapPermission::from_bits(((p << 1) as u8) | MapPermission::U.bits).unwrap();
+            let mut area = MapArea::new(start.into(), end.into(), MapType::Framed, permission);
+            for n in first..last {
+                let vpn = VirtPageNum(n);
+                let frame = match frame_alloc() {
+                    Some(frame) => frame,
+                    None => {
+                        for mapped in first..n {
+                            area.unmap_one(&mut self.page_table, VirtPageNum(mapped));
+                        }
+                        return -1;
+                    }
+                };
+                if !self.page_table.try_map(
+                    vpn,
+                    frame.ppn,
+                    PTEFlags::from_bits(permission.bits).unwrap(),
+                ) {
+                    for mapped in first..n {
+                        area.unmap_one(&mut self.page_table, VirtPageNum(mapped));
+                    }
+                    return -1;
+                }
+                area.data_frames.insert(vpn, frame);
+            }
+            self.areas.push(area);
+        } else {
+            for n in first..last {
+                let vpn = VirtPageNum(n);
+                if !self
+                    .areas
+                    .iter()
+                    .any(|area| area.data_frames.contains_key(&vpn))
+                {
+                    return -1;
+                }
+            }
+            for n in first..last {
+                let vpn = VirtPageNum(n);
+                if let Some(area) = self
+                    .areas
+                    .iter_mut()
+                    .find(|area| area.data_frames.contains_key(&vpn))
+                {
+                    area.unmap_one(&mut self.page_table, vpn);
+                } else {
+                    return -1;
+                }
+            }
+        }
+        0
+    }
     /// Create a new empty `MemorySet`.
     pub fn new_bare() -> Self {
         Self {

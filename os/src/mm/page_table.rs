@@ -107,7 +107,7 @@ impl PageTable {
                 break;
             }
             if !pte.is_valid() {
-                let frame = frame_alloc().unwrap();
+                let frame = frame_alloc()?;
                 *pte = PageTableEntry::new(frame.ppn, PTEFlags::V);
                 self.frames.push(frame);
             }
@@ -139,6 +139,18 @@ impl PageTable {
         let pte = self.find_pte_create(vpn).unwrap();
         assert!(!pte.is_valid(), "vpn {:?} is mapped before mapping", vpn);
         *pte = PageTableEntry::new(ppn, flags | PTEFlags::V);
+    }
+    /// Map a page, returning false if a page-table frame cannot be allocated.
+    pub fn try_map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) -> bool {
+        if let Some(pte) = self.find_pte_create(vpn) {
+            if pte.is_valid() {
+                return false;
+            }
+            *pte = PageTableEntry::new(ppn, flags | PTEFlags::V);
+            true
+        } else {
+            false
+        }
     }
     /// remove the map between virtual page number and physical page number
     #[allow(unused)]

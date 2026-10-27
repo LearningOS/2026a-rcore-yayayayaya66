@@ -1,5 +1,21 @@
 //! Process management syscalls
+use crate::mm::{PTEFlags, PageTable, VirtAddr};
 use crate::task::{change_program_brk, exit_current_and_run_next, suspend_current_and_run_next};
+use crate::task::{current_user_token, syscall_count, user_mapping};
+use crate::timer::get_time_us;
+
+// Translate one user byte without dereferencing an invalid or privileged mapping.
+fn user_byte(addr: usize, access: PTEFlags) -> Option<&'static mut u8> {
+    if addr >= (1usize << 38) {
+        return None;
+    }
+    let va = VirtAddr::from(addr);
+    let pte = PageTable::from_token(current_user_token()).translate(va.floor())?;
+    if !pte.is_valid() || !pte.flags().contains(PTEFlags::U | access) {
+        return None;
+    }
+    Some(&mut pte.ppn().get_bytes_array()[va.page_offset()])
+}
 
 #[repr(C)]
 #[derive(Debug)]
@@ -25,28 +41,59 @@ pub fn sys_yield() -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!("kernel: sys_get_time");
-    -1
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
+    let addr = ts as usize;
+    let us = get_time_us();
+    let time = TimeVal {
+        sec: us / 1_000_000,
+        usec: us % 1_000_000,
+    };
+    let bytes = unsafe {
+        core::slice::from_raw_parts(
+            &time as *const TimeVal as *const u8,
+            core::mem::size_of::<TimeVal>(),
+        )
+    };
+    for i in 0..bytes.len() {
+        if addr
+            .checked_add(i)
+            .and_then(|a| user_byte(a, PTEFlags::W))
+            .is_none()
+        {
+            return -1;
+        }
+    }
+    for (i, byte) in bytes.iter().enumerate() {
+        *user_byte(addr + i, PTEFlags::W).unwrap() = *byte;
+    }
+    0
 }
 
 /// TODO: Finish sys_trace to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
-pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
-    trace!("kernel: sys_trace");
-    -1
+pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
+    match trace_request {
+        0 => user_byte(id, PTEFlags::R).map_or(-1, |b| *b as isize),
+        1 => match user_byte(id, PTEFlags::W) {
+            Some(b) => {
+                *b = data as u8;
+                0
+            }
+            None => -1,
+        },
+        2 => syscall_count(id),
+        _ => -1,
+    }
 }
 
 // YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
-    -1
+pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
+    user_mapping(start, len, Some(prot))
 }
 
 // YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
-    -1
+pub fn sys_munmap(start: usize, len: usize) -> isize {
+    user_mapping(start, len, None)
 }
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {
