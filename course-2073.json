@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "courseId": 2073,
+  "repository": "LearningOS/2026a-rcore-yayayayaya66",
+  "user": "yayayayaya66",
+  "totalScore": 500,
+  "chapters": {
+    "ch4": {
+      "points": "16/16",
+      "score": 100,
+      "commit": "ff78d027e6d3b8eb765cf3ef0c10141b9189c509"
+    }
+  },
+  "score": 100,
+  "upload": {
+    "status": "pending",
+    "runId": "40467175025",
+    "runAttempt": "1"
+  }
+}
