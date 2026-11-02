@@ -8,13 +8,21 @@ use bitflags::*;
 bitflags! {
     /// page table entry flags
     pub struct PTEFlags: u8 {
+        /// V page table flag.
         const V = 1 << 0;
+        /// R page table flag.
         const R = 1 << 1;
+        /// W page table flag.
         const W = 1 << 2;
+        /// X page table flag.
         const X = 1 << 3;
+        /// U page table flag.
         const U = 1 << 4;
+        /// G page table flag.
         const G = 1 << 5;
+        /// A page table flag.
         const A = 1 << 6;
+        /// D page table flag.
         const D = 1 << 7;
     }
 }
@@ -131,6 +139,19 @@ impl PageTable {
         let pte = self.find_pte_create(vpn).unwrap();
         assert!(!pte.is_valid(), "vpn {:?} is mapped before mapping", vpn);
         *pte = PageTableEntry::new(ppn, flags | PTEFlags::V);
+    }
+    /// remove the map between virtual page number and physical page number
+    #[allow(unused)]
+    pub fn try_map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) -> bool {
+        if let Some(pte) = self.find_pte_create(vpn) {
+            if pte.is_valid() {
+                return false;
+            }
+            *pte = PageTableEntry::new(ppn, flags | PTEFlags::V);
+            true
+        } else {
+            false
+        }
     }
     /// remove the map between virtual page number and physical page number
     #[allow(unused)]

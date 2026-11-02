@@ -125,7 +125,17 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
     }
 }
 
+/// Create a hard link in the root directory.
+pub fn link_file(old: &str, new: &str) -> bool { ROOT_INODE.link(old, new) }
+/// Remove a root-directory name.
+pub fn unlink_file(name: &str) -> bool { ROOT_INODE.unlink(name) }
+
 impl File for OSInode {
+    fn stat(&self) -> Option<super::Stat> {
+        let id = self.inner.exclusive_access().inode.identity();
+        Some(super::Stat { dev: 0, ino: id, mode: super::StatMode::FILE, nlink: ROOT_INODE.link_count(id), pad: [0; 7] })
+    }
+
     fn readable(&self) -> bool {
         self.readable
     }

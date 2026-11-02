@@ -7,6 +7,8 @@ use crate::mm::UserBuffer;
 
 /// trait File for all file types
 pub trait File: Send + Sync {
+    /// File metadata, when supported.
+    fn stat(&self) -> Option<Stat> { None }
     /// the file readable?
     fn readable(&self) -> bool;
     /// the file writable?
@@ -30,7 +32,7 @@ pub struct Stat {
     /// number of hard links
     pub nlink: u32,
     /// unused pad
-    pad: [u64; 7],
+    pub pad: [u64; 7],
 }
 
 bitflags! {
@@ -46,5 +48,5 @@ bitflags! {
     }
 }
 
-pub use inode::{list_apps, open_file, OSInode, OpenFlags};
+pub use inode::{list_apps, open_file, link_file, unlink_file, OSInode, OpenFlags};
 pub use stdio::{Stdin, Stdout};
