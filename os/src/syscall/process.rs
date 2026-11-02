@@ -1,6 +1,6 @@
 use crate::{
     fs::{open_file, OpenFlags},
-    mm::{translated_ref, translated_refmut, translated_str},
+    mm::{translated_ref, translated_refmut, translated_str, PageTable, PTEFlags, VirtAddr},
     task::{
         current_process, current_task, current_user_token, exit_current_and_run_next, pid2process,
         suspend_current_and_run_next, SignalFlags,
@@ -151,12 +151,24 @@ pub fn sys_kill(pid: usize, signal: u32) -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
-        current_task().unwrap().process.upgrade().unwrap().getpid()
-    );
-    -1
+fn user_writable_byte(addr: usize) -> Option<&'static mut u8> {
+    if addr >= (1usize << 38) { return None; }
+    let va = VirtAddr::from(addr);
+    let pte = PageTable::from_token(current_user_token()).translate(va.floor())?;
+    if !pte.is_valid() || !pte.flags().contains(PTEFlags::U | PTEFlags::W) { return None; }
+    Some(&mut pte.ppn().get_bytes_array()[va.page_offset()])
+}
+
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
+    let us = crate::timer::get_time_us();
+    let time = TimeVal { sec: us / 1_000_000, usec: us % 1_000_000 };
+    let bytes = unsafe { core::slice::from_raw_parts(&time as *const TimeVal as *const u8, core::mem::size_of::<TimeVal>()) };
+    let addr = ts as usize;
+    for i in 0..bytes.len() {
+        if addr.checked_add(i).and_then(user_writable_byte).is_none() { return -1; }
+    }
+    for (i, byte) in bytes.iter().enumerate() { *user_writable_byte(addr + i).unwrap() = *byte; }
+    0
 }
 
 /// mmap syscall
